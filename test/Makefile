@@ -2,7 +2,7 @@
 ##                           The MIT License
 ##
 ##   BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-##   Copyright (C) 2019  Intel Corporation, Heng Li.
+##   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
 ##
 ##   Permission is hereby granted, free of charge, to any person obtaining
 ##   a copy of this software and associated documentation files (the
@@ -28,10 +28,13 @@
 ##                                Heng Li <hli@jimmy.harvard.edu> 
 ##*****************************************************************************************/
 
-
-EXE=		fmi_test smem2_test bwt_seed_strategy_test sa2ref_test xeonbsw
-CXX=		icpc
-CXXFLAGS=	-std=c++11 -fopenmp -mtune=native -march=native
+EXE=		fmi_test2
+# fmi_test2
+#smem2_test bwt_seed_strategy_test sa2ref_test xeonbsw
+CXX=	icpc
+#icpc
+CXXFLAGS=	-std=c++11 -fopenmp -msse4.1
+#CXXFLAGS=	-std=c++11 -fopenmp -mtune=native -march=sse4.1
 CPPFLAGS=	-DENABLE_PREFETCH -DBWA_OTHER_ELE=0
 INCLUDES=	-I../src
 LIBS=		-L.. -fopenmp -lz -lbwa
@@ -45,6 +48,9 @@ LIBS=		-L.. -fopenmp -lz -lbwa
 all:$(EXE)
 
 fmi_test:fmi_test.o ../libbwa.a
+	$(CXX) -o $@ $^ $(LIBS)
+
+fmi_test2:fmi_test2.o ../libbwa.a
 	$(CXX) -o $@ $^ $(LIBS)
 
 smem2_test: smem2_test.o ../libbwa.a
@@ -69,6 +75,8 @@ bwt_seed_strategy_test.o: ../src/FMI_search.h ../src/bntseq.h ../src/read_index_
 bwt_seed_strategy_test.o: ../src/bwa.h ../src/bwt.h ../src/utils.h ../src/macro.h
 fmi_test.o: ../src/FMI_search.h ../src/bntseq.h ../src/read_index_ele.h
 fmi_test.o: ../src/bwa.h ../src/bwt.h ../src/utils.h ../src/macro.h
+fmi_test2.o: ../src/FMI_search.h ../src/bntseq.h ../src/read_index_ele.h 
+fmi_test2.o: ../src/bwa.h ../src/bwt.h ../src/utils.h ../src/macro.h ../src/kstring.h ../src/kvec.h ../src/kseq.h
 main_banded.o: ../src/bandedSWA.h ../src/macro.h
 sa2ref_test.o: ../src/FMI_search.h ../src/bntseq.h ../src/read_index_ele.h
 sa2ref_test.o: ../src/bwa.h ../src/bwt.h ../src/utils.h ../src/macro.h

@@ -2,7 +2,7 @@
                            The MIT License
 
    BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-   Copyright (C) 2019  Intel Corporation, Heng Li.
+   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -39,7 +39,7 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 #include <ittnotify.h>
 #endif
 
-#define QUERY_DB_SIZE 1280000000
+#define QUERY_DB_SIZE 128000000000
 int myrank, num_ranks;
 
 int main(int argc, char **argv) {
@@ -73,7 +73,6 @@ int main(int argc, char **argv) {
     int32_t *query_cum_len_ar = (int32_t *)_mm_malloc(numReads * sizeof(int32_t), 64);
 
     FMI_search *fmiSearch = new FMI_search(argv[1]);
-    fmiSearch->load_index();
 
 
     int max_readlength = seqs[0].l_seq;
@@ -86,9 +85,10 @@ int main(int argc, char **argv) {
             min_readlength = seqs[i].l_seq;
     }
     assert(max_readlength > 0);
-    assert(max_readlength < 10000);
+    assert(max_readlength < 2000000000);
     assert(numReads > 0);
-    assert(numReads * max_readlength < QUERY_DB_SIZE);
+    printf("num read x max readlength=%d\n",numReads * max_readlength );
+    //assert(numReads * max_readlength < QUERY_DB_SIZE);
     printf("numReads = %d, max_readlength = %d, min_readlength = %d\n", numReads, max_readlength, min_readlength);
     uint8_t *enc_qdb=(uint8_t *)malloc(numReads * max_readlength * sizeof(uint8_t));
 
@@ -127,16 +127,15 @@ int main(int argc, char **argv) {
     assert(batch_size > 0);
     assert(batch_size <= numReads);
 
+    SMEM *matchArray = (SMEM *)_mm_malloc(numReads * max_readlength * sizeof(SMEM), 64);
 
     int32_t minSeedLen = atoi(argv[4]);
     int numthreads=atoi(argv[5]);
     assert(numthreads > 0);
     assert(numthreads <= omp_get_max_threads());
-    SMEM *matchArray[numthreads];
 
     int64_t num_batches = (numReads + batch_size - 1 ) / batch_size;
-    int64_t *numTotalSmem = (int64_t *)_mm_malloc(num_batches * sizeof(int64_t), 64);;
-    SMEM **batchStart = (SMEM **)_mm_malloc(num_batches * sizeof(SMEM *), 64);;
+    int64_t numTotalSmem[num_batches];
 #pragma omp parallel num_threads(numthreads)
     {
         int tid = omp_get_thread_num();
@@ -158,18 +157,13 @@ int main(int argc, char **argv) {
 #endif
     startTick = __rdtsc();
     memset(numTotalSmem, 0, num_batches * sizeof(int64_t));
-    memset(batchStart, 0, num_batches * sizeof(int64_t));
     int64_t workTicks[numthreads];
     memset(workTicks, 0, numthreads * sizeof(int64_t));
-    int64_t perThreadQuota = numReads / numthreads;
 
 #pragma omp parallel num_threads(numthreads)
     {
         int32_t *rid_array = (int32_t *)_mm_malloc(batch_size * sizeof(int32_t), 64);
         int32_t tid = omp_get_thread_num();
-        int64_t matchArrayAlloc = perThreadQuota * 20;
-        matchArray[tid] = (SMEM *)malloc(matchArrayAlloc * sizeof(SMEM));
-        int64_t myTotalSmems = 0;
         int64_t startTick = __rdtsc();
 
 #pragma omp for schedule(dynamic)
@@ -186,11 +180,6 @@ int main(int argc, char **argv) {
             int32_t batch_id = i/batch_size;
             //printf("%d] i = %d, batch_count = %d, batch_size = %d\n", tid, i, batch_count, batch_size);
             //fflush(stdout);
-            if((matchArrayAlloc - myTotalSmems) < (batch_size * max_readlength))
-            {
-                matchArrayAlloc *= 2;
-                matchArray[tid] = (SMEM *)realloc(matchArray[tid], matchArrayAlloc * sizeof(SMEM)); 
-            }
             fmiSearch->getSMEMsAllPosOneThread(enc_qdb + i * max_readlength,
                     min_intv_array + i,
                     rid_array,
@@ -200,19 +189,19 @@ int main(int argc, char **argv) {
                     query_cum_len_ar,
                     max_readlength,
                     minSeedLen,
-                    matchArray[tid] + myTotalSmems,
+                    matchArray + i * max_readlength,
                     numTotalSmem + batch_id);
-            batchStart[batch_id] = matchArray[tid] + myTotalSmems;
-            fmiSearch->sortSMEMs(matchArray[tid] + myTotalSmems,
+            //printf("numTotalSmem = %d\n", numTotalSmem[batch_id]);
+            //fflush(stdout);
+            fmiSearch->sortSMEMs(matchArray + i * max_readlength,
                     numTotalSmem + batch_id,
                     batch_count,
                     max_readlength,
                     1);
             for(j = 0; j < numTotalSmem[batch_id]; j++)
             {
-                matchArray[tid][myTotalSmems + j].rid += i;
+                matchArray[i * max_readlength + j].rid += i;
             }
-            myTotalSmems += numTotalSmem[batch_id];
             int64_t et1 = __rdtsc();
             workTicks[tid] += (et1 - st1);
         }
@@ -246,11 +235,11 @@ int main(int argc, char **argv) {
     }
     printf("totalSmems = %ld\n", totalSmem);
 
-#ifdef PRINT_OUTPUT
     int32_t prevRid = -1;
     for(batch_id = 0; batch_id < num_batches; batch_id++)
     {
-        SMEM *myMatchArray = batchStart[batch_id];
+        int32_t first = batch_id * batch_size;;
+        SMEM *myMatchArray = matchArray + first * max_readlength;
         int64_t i;
         for(i = 0; i < numTotalSmem[batch_id]; i++)
         {
@@ -278,16 +267,11 @@ int main(int argc, char **argv) {
             printf("\n");
         }
     }
-#endif
-    _mm_free(query_cum_len_ar);
+
+    //free(query_seq);
     free(enc_qdb);
-    for(int tid = 0; tid < numthreads; tid++)
-    {
-        free(matchArray[tid]);
-    }
+    _mm_free(matchArray);
     _mm_free(min_intv_array);
-    _mm_free(numTotalSmem);
-    _mm_free(batchStart);
     delete fmiSearch;
     return 0;
 }
